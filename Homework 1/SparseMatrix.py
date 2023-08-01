@@ -1,5 +1,6 @@
-from typing import List
+from typing import List, Dict
 import numpy as np
+import networkx as nx
 from itertools import chain
 
 MatrixList = List[List[float]]
@@ -82,7 +83,7 @@ def generateSparseSDDMatrix(size: int, min_val=-100, max_val=100, sparsity=0.5):
     np.fill_diagonal(A, diagonal)
     return A
 
-def sor(A, b, x0, omega, tol=1e-10):
+def sor(A: SparseMatrix, b: np.ndarray | List[float], x0: np.ndarray | List[float] = None, omega: float = 0.5, tol:float = 1e-10, max_iter: int = 1000):
     """
     Solves linear system with SOR iteration.
     
@@ -93,15 +94,20 @@ def sor(A, b, x0, omega, tol=1e-10):
     - omega: relaxation factor
     - tol: error tolerance
     Outputs:
-    - x: solution of a linear system
+    - x: solution of a linear system 
     - it: number of iterations until tolerance is met
+    - max_iter: max number of iterations before quitting
     
     To assure convergence the input must be strictly diagonal dominant matrix.
     """
-    x = x0
+    
+    if x0 is None:
+        x = np.random.rand(len(A))
+    else:
+        x = x0.copy()
 
     it = 0
-    while np.max(np.abs(A @ x - b)) > tol:
+    while np.max(np.abs(A @ x - b)) > tol and it < max_iter:
         for i in range(len(A)):
             x_new = b[i]
             for j in range(len(A)):
@@ -110,3 +116,40 @@ def sor(A, b, x0, omega, tol=1e-10):
             x[i] = (1-omega) * x[i] + omega/A[i,i] * x_new
         it += 1
     return x, it
+
+def getGraphPosSOR(G: nx.Graph, initial_pos: Dict[int, List[float]], omega: float = 0.5, tol: float = 1e-10):
+  """
+  Sets position of vertices in a graphs according to Force-Directed Graph Drawing method in euclidean space using SOR method
+  
+  Arguments:
+  - G: graph in a NetworkX format
+  - initial_pos: optional dict where keys are vertex labels and values are initial 2D coordinates of vertices
+  - omega: relaxation factor for SOR method
+  - tol: error tolerance for SOR method
+  Outputs:
+  - pos: same as initial_pos only that all vertices all present
+  - it: number of iterations until tolerance is met
+  """
+  A = SparseMatrix.fromFull(nx.adjacency_matrix(G).todense())
+  st = np.array(nx.degree(G))[:,1]
+  
+  pos_filter = np.zeros_like(st, dtype=bool)
+  pos_filter[list(initial_pos.keys())] = 1
+
+  pos = np.random.rand(pos_filter.shape[0],2)
+  initial_pos_array = np.array(list(initial_pos.values()))
+  pos[pos_filter] = initial_pos_array
+  
+  pos_prev = np.ones_like(pos) * np.Inf
+  it = 0
+  while np.max(np.abs(pos_prev - pos)) > tol:
+    pos_prev = pos.copy()
+    for i in range(len(A)):
+      pos_new = 0
+      for j in range(len(A)):
+        if i != j:
+          pos_new += (A[i,j] * pos[j])
+      pos[i] = (1-omega) * pos[i] + omega/st[i] * pos_new
+    pos[pos_filter] = initial_pos_array
+    it+=1
+  return {k:v.tolist() for k,v in enumerate(pos)}, it
